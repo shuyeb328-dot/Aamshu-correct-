@@ -102,8 +102,8 @@ jobs:
           echo "Plugin found:"
           sed -n '1,240p' plugins/withAamshuNative.js
 
-          if grep -q "withMainApplication" plugins/withAamshuNative.js; then
-            echo "ERROR: Old withMainApplication plugin code detected."
+                    if grep -q "withMainApplication(" plugins/withAamshuNative.js; then
+            echo "ERROR: Old withMainApplication call detected."
             echo "The plugin must use withDangerousMod for Expo SDK 52."
             exit 1
           fi
