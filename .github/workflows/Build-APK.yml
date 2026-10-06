@@ -1,0 +1,221 @@
+name: Build Aamshu APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    env:
+      EXPO_PUBLIC_API_URL: ""
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            aamshu-source/**/package-lock.json
+            aamshu-source/**/npm-shrinkwrap.json
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Find Aamshu ZIP
+        shell: bash
+        run: |
+          set -e
+
+          ZIP=""
+
+          if [ -f "./aamshu-github-ready-aamshu-v4.6-fixed-v3.zip" ]; then
+            ZIP="./aamshu-github-ready-aamshu-v4.6-fixed-v3.zip"
+          elif [ -f "./aamshu-github-ready-aamshu-v4.6-fixed-v2.zip" ]; then
+            ZIP="./aamshu-github-ready-aamshu-v4.6-fixed-v2.zip"
+          else
+            echo "ERROR: Aamshu ZIP not found."
+            echo "Files in repository:"
+            ls -la
+            exit 1
+          fi
+
+          echo "Using ZIP: $ZIP"
+
+          rm -rf aamshu-source
+          mkdir -p aamshu-source
+
+          unzip -q "$ZIP" -d aamshu-source
+
+          echo "Extracted files:"
+          find aamshu-source -maxdepth 3 -type f | head -100
+
+      - name: Locate mobile project
+        shell: bash
+        run: |
+          set -e
+
+          APP_CONFIG=$(find aamshu-source -name "app.config.js" -type f | head -1)
+
+          if [ -z "$APP_CONFIG" ]; then
+            echo "ERROR: app.config.js not found"
+            find aamshu-source -maxdepth 5 -type f | head -200
+            exit 1
+          fi
+
+          MOBILE_DIR=$(dirname "$APP_CONFIG")
+
+          echo "Mobile project: $MOBILE_DIR"
+          echo "MOBILE_DIR=$MOBILE_DIR" >> "$GITHUB_ENV"
+
+      - name: Install mobile dependencies
+        working-directory: ${{ env.MOBILE_DIR }}
+        shell: bash
+        run: |
+          set -e
+
+          npm install --legacy-peer-deps --no-audit --no-fund
+
+          npx expo install expo-asset expo-font
+          npx expo install --fix
+
+      - name: Verify Aamshu native plugin
+        working-directory: ${{ env.MOBILE_DIR }}
+        shell: bash
+        run: |
+          set -e
+
+          echo "Checking native plugin..."
+
+          if [ ! -f "plugins/withAamshuNative.js" ]; then
+            echo "ERROR: plugins/withAamshuNative.js not found"
+            exit 1
+          fi
+
+          echo "Plugin found:"
+          sed -n '1,240p' plugins/withAamshuNative.js
+
+          if grep -q "withMainApplication" plugins/withAamshuNative.js; then
+            echo "ERROR: Old withMainApplication plugin code detected."
+            echo "The plugin must use withDangerousMod for Expo SDK 52."
+            exit 1
+          fi
+
+          echo "Native plugin check passed."
+
+      - name: Generate Android project
+        working-directory: ${{ env.MOBILE_DIR }}
+        shell: bash
+        run: |
+          set -e
+
+          rm -rf android
+
+          CI=1 npx expo prebuild \
+            --platform android \
+            --clean \
+            --non-interactive
+
+      - name: Verify generated Android project
+        working-directory: ${{ env.MOBILE_DIR }}
+        shell: bash
+        run: |
+          set -e
+
+          if [ ! -d "android" ]; then
+            echo "ERROR: Android project was not generated."
+            exit 1
+          fi
+
+          echo "Android project generated successfully."
+
+          find android/app/src/main/java -type f | sort | head -100
+
+      - name: Enable AndroidX
+        working-directory: ${{ env.MOBILE_DIR }}/android
+        shell: bash
+        run: |
+          set -e
+
+          touch gradle.properties
+
+          grep -q "^android.useAndroidX=true" gradle.properties || \
+            echo "android.useAndroidX=true" >> gradle.properties
+
+          grep -q "^android.enableJetifier=true" gradle.properties || \
+            echo "android.enableJetifier=true" >> gradle.properties
+
+          echo "Gradle properties:"
+          cat gradle.properties
+
+      - name: Fix Aamshu native Java source
+        working-directory: ${{ env.MOBILE_DIR }}
+        shell: bash
+        run: |
+          set -e
+
+          JAVA_FILE="android/app/src/main/java/com/aamshu/assistant/AamshuAssistantModule.java"
+
+          if [ -f "$JAVA_FILE" ]; then
+            echo "Checking AamshuAssistantModule.java"
+
+            sed -i 's/private static boolean active = false;/private static volatile boolean active = false;/' "$JAVA_FILE"
+
+            echo "Native Java source:"
+            sed -n '1,240p' "$JAVA_FILE"
+          else
+            echo "AamshuAssistantModule.java not found."
+            find android/app/src/main/java -name "AamshuAssistant*.java" -o -name "AamshuAssistant*.kt"
+          fi
+
+      - name: Build release APK
+        working-directory: ${{ env.MOBILE_DIR }}/android
+        shell: bash
+        run: |
+          set -e
+
+          chmod +x gradlew
+
+          ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Find APK
+        working-directory: ${{ env.MOBILE_DIR }}
+        shell: bash
+        run: |
+          set -e
+
+          echo "Searching for APK..."
+
+          find android/app/build/outputs/apk/release \
+            -type f \
+            -name "*.apk" \
+            -print
+
+          APK=$(find android/app/build/outputs/apk/release \
+            -type f \
+            -name "*.apk" \
+            | head -1)
+
+          if [ -z "$APK" ]; then
+            echo "ERROR: APK was not generated."
+            exit 1
+          fi
+
+          echo "APK found: $APK"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Aamshu-release
+          path: ${{ env.MOBILE_DIR }}/android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
