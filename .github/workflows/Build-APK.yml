@@ -32,22 +32,15 @@ jobs:
       - name: Find Aamshu ZIP
         shell: bash
         run: |
-          set -e
-
-          ZIP=""
-
-          if [ -f "./aamshu-github-ready-aamshu-v4.6-fixed-v3.zip" ]; then
-            ZIP="./aamshu-github-ready-aamshu-v4.6-fixed-v3.zip"
-          elif [ -f "./aamshu-github-ready-aamshu-v4.6-fixed-v2.zip" ]; then
-            ZIP="./aamshu-github-ready-aamshu-v4.6-fixed-v2.zip"
-          else
-            echo "ERROR: Aamshu ZIP not found."
-            echo "Files in repository:"
-            ls -la
-            exit 1
-          fi
-
-          echo "Using ZIP: $ZIP"
+         set -e   
+      
+          
+           if [ -f "./aamshu-github-ready-aamshu-v4.6-fixed-v4.zip" ]; then
+          ZIP="./aamshu-github-ready-aamshu-v4.6-fixed-v4.zip"
+         elif [ -f "./aamshu-github-ready-aamshu-v4.6-fixed-v3.zip" ]; then
+             ZIP="./aamshu-github-ready-aamshu-v4.6-fixed-v3.zip"
+         elif [ -f "./aamshu-github-ready-aamshu-v4.6-fixed-v2.zip" ]; then
+         ZIP="./aamshu-github-ready-aamshu-v4.6-fixed-v2.zip"
 
           rm -rf aamshu-source
           mkdir -p aamshu-source
